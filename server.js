@@ -6,7 +6,7 @@ import 'dotenv/config';
 import connectDB from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 
-const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173']; // Add any other deployment URLs here later
+const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174']; // Add any other deployment URLs here later
 
 const corsOptions = {
     origin: function (origin, callback) {
