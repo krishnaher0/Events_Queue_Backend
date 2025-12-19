@@ -5,17 +5,19 @@ import cors from 'cors';
 import 'dotenv/config'; 
 import connectDB from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
+import path from 'path';
 
-const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174']; // Add any other deployment URLs here later
+import passport from 'passport';
 
+
+import configurePassport from './config/passport.js';
+
+
+// Allow all origins (development). For production, replace this with a safe whitelist or use an env var.
 const corsOptions = {
     origin: function (origin, callback) {
-        // Check if the origin is in the allowed list or if it's a same-origin request (origin is undefined for tools like Postman)
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
+        // Allow requests with no origin (e.g., Postman) and allow any browser origin
+        callback(null, true);
     },
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
     credentials: true,
@@ -24,6 +26,7 @@ const corsOptions = {
 
 // Initialize App and DB
 connectDB();
+configurePassport();
 const app = express();
 
 
