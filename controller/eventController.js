@@ -1,5 +1,5 @@
-import Event from '../models/Event.model.js';
-import User from '../models/User.model.js';
+import Event from '../model/Event.js';
+import User from '../model/User.js';
 import { deleteImage, getPublicIdFromUrl } from '../config/cloudinary.js';
 
 // @desc    Get all events
