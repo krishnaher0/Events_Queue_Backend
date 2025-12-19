@@ -1,8 +1,8 @@
 import express from 'express';
 import passport from 'passport';
-import { signup, login, getMe, getMyTickets, forgotPassword, verifyCode, resetPassword, resendCode } from '../controllers/auth.controller.js';
+import { signup, login, getMe, getMyTickets, forgotPassword, verifyCode, resetPassword, resendCode } from '../controller/authController.js';
 import { signupSchema, loginSchema, forgotPasswordSchema, verifyCodeSchema, resetPasswordSchema, validate } from '../validators/auth.validator.js';
-import { protect } from '../middlewares/auth.middleware.js';
+import { protect } from '../middleware/authMiddleware.js';
 import generateToken from '../utils/generateToken.js';
 
 const router = express.Router();

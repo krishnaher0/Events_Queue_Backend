@@ -1,4 +1,4 @@
-import User from '../models/User.model.js';
+import User from '../model/User.js';
 import generateToken from '../utils/generateToken.js';
 import { sendVerificationCode, sendPasswordResetSuccess } from '../utils/sendEmail.js';
 
