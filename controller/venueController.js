@@ -1,4 +1,4 @@
-import Venue from '../models/Venue.model.js';
+import Venue from '../model/Venue.js';
 
 import { deleteImage, getPublicIdFromUrl } from '../config/cloudinary.js';
 

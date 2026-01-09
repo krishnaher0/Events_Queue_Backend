@@ -1,6 +1,6 @@
-import Review from '../models/Review.model.js';
-import Product from '../models/Product.model.js';
-import Order from '../models/Order.model.js';
+import Review from '../model/Review.js';
+import Product from '../model/Product.js';
+import Order from '../model/Order.js';
 
 // @desc    Get reviews for a product
 // @route   GET /api/reviews/product/:productId

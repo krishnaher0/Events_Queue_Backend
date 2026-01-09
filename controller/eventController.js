@@ -255,6 +255,15 @@ export const createEvent = async (req, res) => {
       eventData.image = req.file.path;
     }
 
+    // Set approval and status based on user role
+    if (req.user.role === 'admin') {
+      eventData.isApproved = true;
+      eventData.status = 'published';
+    } else {
+      eventData.isApproved = false;
+      eventData.status = 'pending';
+    }
+
     const event = await Event.create(eventData);
 
     res.status(201).json({
