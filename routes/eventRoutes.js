@@ -19,9 +19,9 @@ import {
   getAdminStats,
   getAllUsers,
   updateUserRole,
-} from '../controllers/eventController.js';
+} from '../controller/eventController.js';
 import { createEventSchema, updateEventSchema, validate } from '../validators/event.validator.js';
-import { protect, authorize } from '../middlewares/authMiddleware.js';
+import { protect, authorize } from '../middleware/authMiddleware.js';
 import { uploadEventImage } from '../config/cloudinary.js';
 
 const router = express.Router();

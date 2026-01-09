@@ -10,8 +10,8 @@ import {
   getAllProductsAdmin,
   toggleProductStatus,
   toggleFeatured,
-} from '../controllers/productController.js';
-import { protect, authorize } from '../middlewares/authMiddleware.js';
+} from '../controller/productController.js';
+import { protect, authorize } from '../middleware/authMiddleware.js';
 import { uploadProductImage } from '../config/cloudinary.js';
 
 const router = express.Router();
