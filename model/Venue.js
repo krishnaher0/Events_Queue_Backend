@@ -165,14 +165,13 @@ const venueSchema = new mongoose.Schema(
 );
 
 // Generate slug before saving
-venueSchema.pre('save', function (next) {
+venueSchema.pre('save', function () {
   if (this.isModified('name')) {
     this.slug = this.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '') + '-' + Date.now();
   }
-  next();
 });
 
 // Text search index

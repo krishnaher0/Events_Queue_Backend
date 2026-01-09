@@ -215,14 +215,13 @@ const eventSchema = new mongoose.Schema({
 });
 
 // Generate slug before saving
-eventSchema.pre('save', function(next) {
+eventSchema.pre('save', function() {
   if (this.isModified('title') || !this.slug) {
     this.slug = this.title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)+/g, '') + '-' + Date.now();
   }
-  next();
 });
 
 // Virtual for total tickets sold
