@@ -1,5 +1,5 @@
 import Venue from '../model/Venue.js';
-
+import VenueBooking from '../model/VenueBooking.js';
 import { deleteImage, getPublicIdFromUrl } from '../config/cloudinary.js';
 
 // @desc    Get all venues
@@ -486,4 +486,253 @@ export const checkAvailability = async (req, res) => {
   }
 };
 
-// 
+// @desc    Book a venue
+// @route   POST /api/venues/:id/book
+// @access  Private
+export const bookVenue = async (req, res) => {
+  try {
+    const venue = await Venue.findById(req.params.id);
+
+    if (!venue) {
+      return res.status(404).json({
+        success: false,
+        message: 'Venue not found',
+      });
+    }
+
+    if (!venue.isActive || !venue.isApproved) {
+      return res.status(400).json({
+        success: false,
+        message: 'Venue is not available for booking',
+      });
+    }
+
+    const {
+      eventName,
+      eventType,
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      expectedGuests,
+      requirements,
+      notes,
+    } = req.body;
+
+    // Validate dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const now = new Date();
+
+    if (start < now) {
+      return res.status(400).json({
+        success: false,
+        message: 'Start date must be in the future',
+      });
+    }
+
+    if (end < start) {
+      return res.status(400).json({
+        success: false,
+        message: 'End date must be after start date',
+      });
+    }
+
+    // Check for conflicting bookings
+    const conflictingBookings = await VenueBooking.find({
+      venue: venue._id,
+      status: { $in: ['pending', 'confirmed'] },
+      $or: [
+        {
+          startDate: { $lte: end },
+          endDate: { $gte: start },
+        },
+      ],
+    });
+
+    if (conflictingBookings.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Venue is not available for the selected dates',
+        conflictingBookings: conflictingBookings.map(b => ({
+          startDate: b.startDate,
+          endDate: b.endDate,
+        })),
+      });
+    }
+
+    // Calculate pricing
+    const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) || 1;
+    const basePrice = venue.pricing.basePrice * days;
+    let additionalServices = 0;
+
+    if (requirements) {
+      if (requirements.catering && venue.amenities.catering) {
+        additionalServices += venue.pricing.cateringPerPerson * expectedGuests;
+      }
+      if (requirements.decoration && venue.pricing.decorationPackage) {
+        additionalServices += venue.pricing.decorationPackage;
+      }
+      if (requirements.audioVisual && venue.pricing.audioVisual) {
+        additionalServices += venue.pricing.audioVisual;
+      }
+    }
+
+    const totalPrice = basePrice + additionalServices;
+
+    // Create booking
+    const booking = await VenueBooking.create({
+      user: req.user._id,
+      venue: venue._id,
+      eventName,
+      eventType,
+      startDate: start,
+      endDate: end,
+      startTime,
+      endTime,
+      expectedGuests,
+      requirements: requirements || {},
+      pricing: {
+        basePrice,
+        additionalServices,
+        totalPrice,
+      },
+      notes,
+      status: 'pending',
+    });
+
+    await booking.populate('venue', 'name image address pricing');
+
+    res.status(201).json({
+      success: true,
+      message: 'Venue booking created successfully. Please proceed with payment.',
+      data: { booking },
+    });
+  } catch (error) {
+    console.error('Book venue error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get my venue bookings
+// @route   GET /api/venues/bookings/my
+// @access  Private
+export const getMyVenueBookings = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status } = req.query;
+    const query = { user: req.user._id };
+
+    if (status) query.status = status;
+
+    const bookings = await VenueBooking.find(query)
+      .populate('venue', 'name image address pricing')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const total = await VenueBooking.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        bookings,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          total,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get my venue bookings error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get single venue booking
+// @route   GET /api/venues/bookings/:id
+// @access  Private
+export const getVenueBooking = async (req, res) => {
+  try {
+    const booking = await VenueBooking.findById(req.params.id)
+      .populate('venue', 'name image address pricing amenities')
+      .populate('user', 'fullName email phone');
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found',
+      });
+    }
+
+    // Check authorization
+    if (booking.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { booking },
+    });
+  } catch (error) {
+    console.error('Get venue booking error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get all venue bookings (Admin)
+// @route   GET /api/venues/admin/bookings
+// @access  Private (Admin)
+export const getAllVenueBookingsAdmin = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const query = {};
+
+    if (status) query.status = status;
+
+    const bookings = await VenueBooking.find(query)
+      .populate('venue', 'name image address pricing')
+      .populate('user', 'fullName email phone')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const total = await VenueBooking.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        bookings,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          total,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get all venue bookings admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+//

@@ -2,6 +2,7 @@ import Payment from '../model/Payment.js';
 import Event from '../model/Event.js';
 import Order from '../model/Order.js';
 import Booking from '../model/Booking.js';
+import VenueBooking from '../model/VenueBooking.js';
 import User from '../model/User.js';
 import Product from '../model/Product.js';
 import {
@@ -114,6 +115,11 @@ export const initiateEventPayment = async (req, res) => {
       await payment.save();
 
       console.log('Khalti Payment Response:', khaltiResponse);
+      console.log('Payment saved with Khalti data:', {
+        paymentId: payment._id,
+        pidx: payment.khalti.pidx,
+        purchaseOrderId: payment.khalti.purchaseOrderId,
+      });
 
       return res.status(200).json({
         success: true,
@@ -317,7 +323,7 @@ export const verifyEventPayment = async (req, res) => {
 // @access  Private
 export const initiateOrderPayment = async (req, res) => {
   try {
-    const { items, shippingAddress } = req.body;
+    const { items, shippingAddress, paymentMethod = 'esewa' } = req.body;
 
     // Validate and calculate totals
     let subtotal = 0;
@@ -368,12 +374,13 @@ export const initiateOrderPayment = async (req, res) => {
         total,
       },
       payment: {
-        method: 'esewa',
+        method: paymentMethod,
         status: 'pending',
       },
     });
 
     const transactionUuid = generateTransactionUuid();
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
     // Create payment record
     const payment = await Payment.create({
@@ -382,20 +389,73 @@ export const initiateOrderPayment = async (req, res) => {
       referenceId: order._id,
       referenceModel: 'Order',
       amount: total,
-      method: 'esewa',
+      method: paymentMethod,
       status: 'initiated',
-      esewa: {
+      esewa: paymentMethod === 'esewa' ? {
         productCode: process.env.ESEWA_MERCHANT_ID,
         transactionUuid,
-      },
+      } : undefined,
+      khalti: paymentMethod === 'khalti' ? {
+        purchaseOrderId: transactionUuid,
+      } : undefined,
       metadata: {
         orderNumber: order.orderNumber,
         itemCount: orderItems.length,
       },
     });
 
-    // Create eSewa payment payload
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    // Handle Khalti payment
+    if (paymentMethod === 'khalti') {
+      const khaltiResponse = await initiateKhaltiPayment({
+        returnUrl: `${frontendUrl}/payment/success?type=order&method=khalti`,
+        websiteUrl: frontendUrl,
+        amount: total * 100, // Convert to paisa
+        purchaseOrderId: transactionUuid,
+        purchaseOrderName: `Order #${order.orderNumber}`,
+        customerInfo: {
+          name: req.user.fullName || 'Customer',
+          email: req.user.email,
+          phone: req.user.phone || '',
+        },
+        productDetails: orderItems.map(item => ({
+          identity: item.product.toString(),
+          name: item.name,
+          total_price: item.subtotal * 100,
+          quantity: item.quantity,
+          unit_price: item.price * 100,
+        })),
+        merchantExtra: JSON.stringify({ orderId: order._id, orderNumber: order.orderNumber }),
+      });
+
+      // Update payment with Khalti pidx
+      payment.khalti = {
+        purchaseOrderId: transactionUuid,
+        pidx: khaltiResponse.pidx,
+      };
+      await payment.save();
+
+      console.log('Khalti Order Payment Response:', khaltiResponse);
+      console.log('Order payment saved with Khalti data:', {
+        paymentId: payment._id,
+        pidx: payment.khalti.pidx,
+        purchaseOrderId: payment.khalti.purchaseOrderId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          paymentId: payment._id,
+          paymentMethod: 'khalti',
+          khaltiPaymentUrl: khaltiResponse.payment_url,
+          pidx: khaltiResponse.pidx,
+          transactionUuid,
+        },
+      });
+    }
+
+    // Handle eSewa payment
     const esewaPayload = createEsewaPayment({
       amount: total,
       transactionUuid,
@@ -604,6 +664,11 @@ export const initiateVenuePayment = async (req, res) => {
       await payment.save();
 
       console.log('Khalti Venue Payment Response:', khaltiResponse);
+      console.log('Venue payment saved with Khalti data:', {
+        paymentId: payment._id,
+        pidx: payment.khalti.pidx,
+        purchaseOrderId: payment.khalti.purchaseOrderId,
+      });
 
       return res.status(200).json({
         success: true,
@@ -756,9 +821,25 @@ export const verifyKhaltiPaymentCallback = async (req, res) => {
     });
 
     if (!payment) {
+      console.error('Payment not found for pidx:', pidx);
+      console.log('Searching for payment with pidx in database...');
+
+      // Debug: Check if any payment exists with this pidx in transactionId or other fields
+      const debugPayment = await Payment.findOne({
+        $or: [
+          { transactionId: pidx },
+          { 'khalti.purchaseOrderId': pidx },
+        ]
+      });
+
+      if (debugPayment) {
+        console.log('Found payment with alternate lookup:', debugPayment._id);
+      }
+
       return res.status(404).json({
         success: false,
-        message: 'Payment record not found',
+        message: 'Payment record not found. The payment may not have been properly initialized.',
+        pidx,
       });
     }
 

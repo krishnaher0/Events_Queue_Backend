@@ -807,3 +807,69 @@ export const updateUserRole = async (req, res) => {
     });
   }
 };
+
+// @desc    Get all event bookings (Admin)
+// @route   GET /api/events/admin/bookings
+// @access  Private (Admin)
+export const getAllEventBookings = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+
+    // Get all events with attendees
+    const events = await Event.find({ 'attendees.0': { $exists: true } })
+      .populate('attendees.user', 'fullName email phone')
+      .select('title image location date ticketTypes attendees')
+      .sort({ 'attendees.bookingDate': -1 });
+
+    // Flatten attendees from all events
+    const allBookings = [];
+    events.forEach(event => {
+      event.attendees.forEach(attendee => {
+        allBookings.push({
+          _id: attendee._id,
+          event: {
+            _id: event._id,
+            title: event.title,
+            image: event.image,
+            location: event.location,
+            date: event.date,
+          },
+          user: attendee.user,
+          ticketType: attendee.ticketType,
+          quantity: attendee.quantity,
+          totalPrice: attendee.totalPrice,
+          bookedAt: attendee.bookingDate,
+          status: attendee.status,
+          paymentStatus: attendee.paymentStatus || 'pending',
+        });
+      });
+    });
+
+    // Sort by booking date
+    allBookings.sort((a, b) => new Date(b.bookedAt) - new Date(a.bookedAt));
+
+    // Pagination
+    const total = allBookings.length;
+    const start = (page - 1) * limit;
+    const paginatedBookings = allBookings.slice(start, start + parseInt(limit));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        bookings: paginatedBookings,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          total,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get all event bookings error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
