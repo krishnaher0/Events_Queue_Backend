@@ -14,6 +14,7 @@ import {
   getOrganizerStats,
   getOrganizerBookings,
   getAllEventsAdmin,
+  getAllEventBookings,
   approveEvent,
   rejectEvent,
   getAdminStats,
@@ -43,6 +44,7 @@ router.get('/organizer/bookings', protect, authorize('organizer', 'admin'), getO
 
 // Admin routes (must be before /:id)
 router.get('/admin/all', protect, authorize('admin'), getAllEventsAdmin);
+router.get('/admin/bookings', protect, authorize('admin'), getAllEventBookings);
 router.get('/admin/stats', protect, authorize('admin'), getAdminStats);
 router.get('/admin/users', protect, authorize('admin'), getAllUsers);
 router.put('/admin/users/:id/role', protect, authorize('admin'), updateUserRole);

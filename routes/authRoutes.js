@@ -1,8 +1,9 @@
 import express from 'express';
 import passport from 'passport';
-import { signup, login, getMe, getMyTickets, forgotPassword, verifyCode, resetPassword, resendCode } from '../controller/authController.js';
+import { signup, login, getMe, getMyTickets, forgotPassword, verifyCode, resetPassword, resendCode, updateProfile } from '../controller/authController.js';
 import { signupSchema, loginSchema, forgotPasswordSchema, verifyCodeSchema, resetPasswordSchema, validate } from '../validators/auth.validator.js';
 import { protect } from '../middleware/authMiddleware.js';
+import { uploadAvatar } from '../config/cloudinary.js';
 import generateToken from '../utils/generateToken.js';
 
 const router = express.Router();
@@ -11,6 +12,7 @@ router.post('/signup', validate(signupSchema), signup);
 router.post('/login', validate(loginSchema), login);
 router.get('/me', protect, getMe);
 router.get('/my-tickets', protect, getMyTickets);
+router.put('/profile', protect, uploadAvatar.single('avatar'), updateProfile);
 
 // Password reset routes
 router.post('/forgot-password', validate(forgotPasswordSchema), forgotPassword);
