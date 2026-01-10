@@ -173,6 +173,11 @@ const eventSchema = new mongoose.Schema({
       enum: ['confirmed', 'pending', 'cancelled'],
       default: 'confirmed',
     },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'paid', 'failed', 'refunded'],
+      default: 'pending',
+    },
   }],
 
   // Status & Visibility

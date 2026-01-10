@@ -47,6 +47,12 @@ const paymentSchema = new mongoose.Schema(
       signature: String,
       refId: String,
     },
+    // Khalti specific fields
+    khalti: {
+      pidx: String,
+      purchaseOrderId: String,
+      transactionId: String,
+    },
     transactionId: String,
     gatewayResponse: {
       type: mongoose.Schema.Types.Mixed,
@@ -69,6 +75,7 @@ paymentSchema.index({ type: 1 });
 paymentSchema.index({ status: 1 });
 paymentSchema.index({ transactionId: 1 });
 paymentSchema.index({ 'esewa.transactionUuid': 1 });
+paymentSchema.index({ 'khalti.pidx': 1 });
 
 const Payment = mongoose.model('Payment', paymentSchema);
 
