@@ -59,15 +59,26 @@ export const resetPasswordSchema = z.object({
     .regex(/[0-9]/, 'Password must contain at least one number'),
 });
 
-export const validate = (schema) => (req, res, next) => {
-  try {
-    schema.parse(req.body);
-    next();
-  } catch (error) {
-    const errors = error.errors.map((err) => ({
-      field: err.path.join('.'),
-      message: err.message,
-    }));
-    return res.status(400).json({ success: false, errors });
-  }
+export const validate = (schema) => {
+  return (req, res, next) => {
+    try {
+      schema.parse(req.body);
+      next();
+    } catch (error) {
+      // Zod 4.x uses .issues instead of .errors
+      if (error.issues && Array.isArray(error.issues)) {
+        const errors = error.issues.map((err) => ({
+          field: err.path.join('.'),
+          message: err.message,
+        }));
+        return res.status(400).json({ success: false, errors });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          error: error.message
+        });
+      }
+    }
+  };
 };
