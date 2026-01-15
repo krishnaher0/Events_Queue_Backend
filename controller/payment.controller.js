@@ -9,12 +9,12 @@ import {
   createEsewaPayment,
   getEsewaPaymentUrl,
   verifyEsewaPayment,
-  decodeEsewaResponse,
 } from '../utils/esewa.js';
 import {
   initiateKhaltiPayment,
   verifyKhaltiPayment,
 } from '../utils/khalti.js';
+import { createNotification } from './notificationController.js';
 import crypto from 'crypto';
 
 // Generate unique transaction UUID
@@ -170,38 +170,23 @@ export const initiateEventPayment = async (req, res) => {
 export const verifyEventPayment = async (req, res) => {
   try {
     console.log('=== verifyEventPayment called ===');
+    console.log('Request query:', req.query);
     console.log('Request body:', req.body);
 
-    const { data } = req.body; // Base64 encoded response from eSewa
+    // eSewa v1 sends data as query parameters
+    const { oid: transaction_uuid, amt: total_amount, refId: transaction_code } = req.query;
 
-    if (!data) {
-      console.log('No data provided in request');
+    if (!transaction_uuid) {
+      console.log('No transaction UUID provided');
       return res.status(400).json({
         success: false,
         message: 'Payment data is required',
       });
     }
 
-    console.log('Raw data received:', data);
-
-    // Decode eSewa response
-    const decodedData = decodeEsewaResponse(data);
-    console.log('Decoded data:', decodedData);
-
-    if (!decodedData) {
-      console.log('Failed to decode eSewa response');
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid payment data',
-      });
-    }
-
-    const { transaction_uuid, status, total_amount, transaction_code } = decodedData;
     console.log('Transaction UUID:', transaction_uuid);
-    console.log('Status:', status);
     console.log('Total Amount:', total_amount);
-    console.log('Transaction Code:', transaction_code);
-
+    console.log('Reference ID:', transaction_code);
     // Find payment record
     console.log('Looking for payment with transaction_uuid:', transaction_uuid);
     const payment = await Payment.findOne({
@@ -217,91 +202,81 @@ export const verifyEventPayment = async (req, res) => {
       });
     }
 
-    if (status === 'COMPLETE') {
-      // Check if this is a test transaction (starts with TEST-)
-      const isTestTransaction = transaction_code?.startsWith('TEST-');
-
-      let verified = false;
-
-      if (isTestTransaction && process.env.ESEWA_ENVIRONMENT === 'test') {
-        // Allow test transactions in test environment
-        console.log('Processing test transaction:', transaction_code);
+    // Verify with eSewa server
+    let verified = false;
+    try {
+      const verification = await verifyEsewaPayment(transaction_uuid, total_amount, transaction_code);
+      verified = verification.success;
+      console.log('eSewa verification result:', verification);
+    } catch (verifyError) {
+      console.error('eSewa verification error:', verifyError);
+      // In test mode, allow if verification fails
+      if (process.env.ESEWA_ENVIRONMENT === 'test') {
+        console.log('Allowing payment in test mode due to verification error');
         verified = true;
-      } else {
-        // Verify with eSewa server for real transactions
-        try {
-          const verification = await verifyEsewaPayment(transaction_uuid, total_amount);
-          verified = verification.status === 'COMPLETE';
-        } catch (verifyError) {
-          console.error('eSewa verification error:', verifyError);
-          // In test mode, allow if verification fails due to sandbox issues
-          if (process.env.ESEWA_ENVIRONMENT === 'test') {
-            console.log('Allowing payment in test mode due to verification error');
-            verified = true;
-          }
-        }
-      }
-
-      if (verified) {
-        console.log('Payment verified! Updating records...');
-
-        // Update payment status
-        payment.status = 'completed';
-        payment.transactionId = transaction_code;
-        payment.paidAt = new Date();
-        payment.gatewayResponse = decodedData;
-        await payment.save();
-        console.log('Payment record updated');
-
-        // Update event booking
-        const event = await Event.findById(payment.referenceId);
-        console.log('Event found:', event ? event.title : 'null');
-
-        if (event) {
-          // Update ticket sold count
-          const ticket = event.ticketTypes.find(t => t.name === payment.metadata.ticketType);
-          if (ticket) {
-            ticket.sold = (ticket.sold || 0) + payment.metadata.quantity;
-            console.log('Ticket sold count updated:', ticket.sold);
-          }
-
-          // Add to attendees
-          event.attendees.push({
-            user: payment.user,
-            ticketType: payment.metadata.ticketType,
-            quantity: payment.metadata.quantity,
-            totalPrice: payment.amount,
-            bookingDate: new Date(),
-            status: 'confirmed',
-          });
-
-          await event.save();
-          console.log('Event updated with new attendee');
-
-          // Add to user's booked events
-          const userUpdate = await User.findByIdAndUpdate(payment.user, {
-            $push: { bookedEvents: event._id },
-          }, { new: true });
-          console.log('User booked events updated:', userUpdate?.bookedEvents);
-        }
-
-        console.log('Payment verification complete - returning success');
-        return res.status(200).json({
-          success: true,
-          message: 'Payment verified successfully',
-          data: {
-            paymentId: payment._id,
-            transactionId: transaction_code,
-            amount: total_amount,
-            eventId: payment.referenceId,
-          },
-        });
       }
     }
 
-    // Payment failed
+    if (verified) {
+      console.log('Payment verified! Updating records...');
+
+      // Update payment status
+      payment.status = 'completed';
+      payment.transactionId = transaction_code;
+      payment.paidAt = new Date();
+      payment.gatewayResponse = { oid: transaction_uuid, amt: total_amount, refId: transaction_code };
+      await payment.save();
+      console.log('Payment record updated');
+
+      // Update event booking
+      const event = await Event.findById(payment.referenceId);
+      console.log('Event found:', event ? event.title : 'null');
+
+      if (event) {
+        // Update ticket sold count
+        const ticket = event.ticketTypes.find(t => t.name === payment.metadata.ticketType);
+        if (ticket) {
+          ticket.sold = (ticket.sold || 0) + payment.metadata.quantity;
+          console.log('Ticket sold count updated:', ticket.sold);
+        }
+
+        // Add to attendees
+        event.attendees.push({
+          user: payment.user,
+          ticketType: payment.metadata.ticketType,
+          quantity: payment.metadata.quantity,
+          totalPrice: payment.amount,
+          bookingDate: new Date(),
+          status: 'confirmed',
+          paymentStatus: 'paid',
+        });
+
+        await event.save();
+        console.log('Event updated with new attendee');
+
+        // Add to user's booked events
+        const userUpdate = await User.findByIdAndUpdate(payment.user, {
+          $push: { bookedEvents: event._id },
+        }, { new: true });
+        console.log('User booked events updated:', userUpdate?.bookedEvents);
+      }
+
+      console.log('Payment verification complete - returning success');
+      return res.status(200).json({
+        success: true,
+        message: 'Payment verified successfully',
+        data: {
+          paymentId: payment._id,
+          transactionId: transaction_code,
+          amount: total_amount,
+          eventId: payment.referenceId,
+        },
+      });
+    }
+
+    // Payment failed or not verified
     payment.status = 'failed';
-    payment.gatewayResponse = decodedData;
+    payment.gatewayResponse = { oid: transaction_uuid, amt: total_amount, refId: transaction_code };
     await payment.save();
 
     return res.status(400).json({
@@ -866,6 +841,7 @@ export const verifyKhaltiPaymentCallback = async (req, res) => {
             totalPrice: payment.amount,
             bookingDate: new Date(),
             status: 'confirmed',
+            paymentStatus: 'paid',
           });
           await event.save();
           await User.findByIdAndUpdate(payment.user, {
@@ -991,6 +967,7 @@ export const completePendingEventPayment = async (req, res) => {
         totalPrice: payment.amount,
         bookingDate: new Date(),
         status: 'confirmed',
+        paymentStatus: 'paid',
       });
 
       await event.save();
@@ -1016,6 +993,89 @@ export const completePendingEventPayment = async (req, res) => {
     });
   } catch (error) {
     console.error('Complete pending payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Complete the most recent pending order payment (fallback when eSewa doesn't return data)
+// @route   POST /api/payments/order/complete-pending
+// @access  Private
+export const completePendingOrderPayment = async (req, res) => {
+  try {
+    console.log('=== completePendingOrderPayment called ===');
+    console.log('User ID:', req.user._id);
+
+    // Find the most recent initiated order payment for this user
+    const payment = await Payment.findOne({
+      user: req.user._id,
+      type: 'product_order',
+      status: 'initiated',
+    }).sort({ createdAt: -1 });
+
+    console.log('Found pending order payment:', payment);
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'No pending order payment found',
+      });
+    }
+
+    // Check if payment was initiated in the last 30 minutes (eSewa session timeout)
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    if (payment.createdAt < thirtyMinutesAgo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment session expired. Please try ordering again.',
+      });
+    }
+
+    console.log('Marking order payment as completed (fallback)...');
+
+    // Update payment status
+    payment.status = 'completed';
+    payment.transactionId = `FALLBACK-${Date.now()}`;
+    payment.paidAt = new Date();
+    payment.gatewayResponse = { note: 'Completed via fallback - eSewa data not received' };
+    await payment.save();
+    console.log('Payment record updated');
+
+    // Update order
+    const order = await Order.findById(payment.referenceId);
+    if (order) {
+      order.payment.status = 'paid';
+      order.payment.transactionId = payment.transactionId;
+      order.payment.paidAt = new Date();
+      order.status = 'confirmed';
+      await order.save();
+
+      // Reduce stock
+      for (const item of order.items) {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { stock: -item.quantity, sold: item.quantity },
+        });
+      }
+    }
+    console.log('Order updated:', order?._id);
+
+    console.log('Fallback order payment completion successful');
+    return res.status(200).json({
+      success: true,
+      message: 'Payment completed successfully',
+      data: {
+        paymentId: payment._id,
+        transactionId: payment.transactionId,
+        amount: payment.amount,
+        orderId: payment.referenceId,
+        orderNumber: order?.orderNumber,
+      },
+    });
+  } catch (error) {
+    console.error('Complete pending order payment error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

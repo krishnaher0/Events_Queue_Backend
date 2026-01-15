@@ -1,6 +1,7 @@
 import Event from '../model/Event.js';
 import User from '../model/User.js';
 import { deleteImage, getPublicIdFromUrl } from '../config/cloudinary.js';
+import { createNotification } from './notificationController.js';
 
 // @desc    Get all events
 // @route   GET /api/events
@@ -19,26 +20,57 @@ export const getEvents = async (req, res) => {
       sort = '-createdAt'
     } = req.query;
 
-    // Query for published and approved events, or show all for demo purposes
-    const query = {
-      $or: [
-        { status: 'published', isApproved: true },
-        { status: 'published' },
-        { status: 'draft' } 
-      ]
-    };
+    // Base query for status
+    const statusConditions = [
+      { status: 'published', isApproved: true },
+      { status: 'published' },
+      { status: 'draft' }
+    ];
+
+    // Build the query object
+    const query = {};
+    const andConditions = [];
+
+    // Add status condition
+    andConditions.push({ $or: statusConditions });
 
     if (category) query.category = category;
-    if (location) query.location = { $regex: location, $options: 'i' };
-    if (date) query.date = { $gte: new Date(date) };
+    if (location) {
+      andConditions.push({
+        $or: [
+          { 'address.city': { $regex: location, $options: 'i' } },
+          { 'address.state': { $regex: location, $options: 'i' } },
+          { 'address.country': { $regex: location, $options: 'i' } },
+          { venueName: { $regex: location, $options: 'i' } }
+        ]
+      });
+    }
+    if (date) query.startDate = { $gte: new Date(date) };
     if (minPrice || maxPrice) {
-      query.price = {};
-      if (minPrice) query.price.$gte = Number(minPrice);
-      if (maxPrice) query.price.$lte = Number(maxPrice);
+      query['ticketTypes.price'] = {};
+      if (minPrice) query['ticketTypes.price'].$gte = Number(minPrice);
+      if (maxPrice) query['ticketTypes.price'].$lte = Number(maxPrice);
     }
     if (search) {
-      query.$text = { $search: search };
+      // Use regex for flexible partial matching - search across multiple fields
+      andConditions.push({
+        $or: [
+          { title: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+          { shortDescription: { $regex: search, $options: 'i' } },
+          { category: { $regex: search, $options: 'i' } },
+          { tags: { $in: [new RegExp(search, 'i')] } },
+          { venueName: { $regex: search, $options: 'i' } }
+        ]
+      });
     }
+
+    // Combine all conditions with $and
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
+
+   
 
     const total = await Event.countDocuments(query);
     const events = await Event.find(query)
@@ -265,6 +297,44 @@ export const createEvent = async (req, res) => {
     }
 
     const event = await Event.create(eventData);
+    const io = req.app.get('io');
+
+    // Send notification to admins about new event (for approval)
+    if (req.user.role !== 'admin') {
+      const admins = await User.find({ role: 'admin' });
+
+      for (const admin of admins) {
+        await createNotification(io, {
+          recipient: admin._id,
+          sender: req.user._id,
+          type: 'event_created',
+          title: 'New Event Pending Approval',
+          message: `${req.user.fullName} created a new event "${event.title}" pending your approval`,
+          link: `/admin/events`,
+          data: { eventId: event._id }
+        });
+      }
+
+      // Notify event creator that their event is pending approval
+      await createNotification(io, {
+        recipient: req.user._id,
+        type: 'event_created',
+        title: 'Event Created Successfully',
+        message: `Your event "${event.title}" has been created and is pending admin approval`,
+        link: `/events/${event._id}`,
+        data: { eventId: event._id }
+      });
+    } else {
+      // Admin created event - notify them it's live
+      await createNotification(io, {
+        recipient: req.user._id,
+        type: 'event_approved',
+        title: 'Event Published',
+        message: `Your event "${event.title}" has been published and is now live!`,
+        link: `/events/${event._id}`,
+        data: { eventId: event._id }
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -314,6 +384,55 @@ export const updateEvent = async (req, res) => {
       });
     }
 
+    // Prepare update data with parsing (same as createEvent)
+    const updateData = { ...req.body };
+
+    // Parse ticketTypes if it's a string (from FormData)
+    if (typeof updateData.ticketTypes === 'string') {
+      try {
+        updateData.ticketTypes = JSON.parse(updateData.ticketTypes);
+      } catch (e) {
+        updateData.ticketTypes = event.ticketTypes; // Keep existing if parse fails
+      }
+    }
+
+    // Parse tags if it's a comma-separated string
+    if (typeof updateData.tags === 'string' && updateData.tags) {
+      updateData.tags = updateData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+    }
+
+    // Parse isFree boolean
+    if (typeof updateData.isFree === 'string') {
+      updateData.isFree = updateData.isFree === 'true';
+    }
+
+    // Parse isFeatured boolean
+    if (typeof updateData.isFeatured === 'string') {
+      updateData.isFeatured = updateData.isFeatured === 'true';
+    }
+
+    // Parse totalCapacity to number
+    if (updateData.totalCapacity) {
+      updateData.totalCapacity = parseInt(updateData.totalCapacity, 10);
+    }
+
+    // Handle address fields from FormData (e.g., address[street], address[city])
+    if (req.body['address[street]'] || req.body['address[city]']) {
+      updateData.address = {
+        street: req.body['address[street]'] || '',
+        city: req.body['address[city]'] || '',
+        state: req.body['address[state]'] || '',
+        country: req.body['address[country]'] || '',
+        zipCode: req.body['address[zipCode]'] || '',
+      };
+      // Clean up the flat address fields
+      delete updateData['address[street]'];
+      delete updateData['address[city]'];
+      delete updateData['address[state]'];
+      delete updateData['address[country]'];
+      delete updateData['address[zipCode]'];
+    }
+
     if (req.file) {
       // Delete old image from Cloudinary if exists
       if (event.image) {
@@ -323,10 +442,10 @@ export const updateEvent = async (req, res) => {
         }
       }
       // Cloudinary returns the URL in req.file.path
-      req.body.image = req.file.path;
+      updateData.image = req.file.path;
     }
 
-    event = await Event.findByIdAndUpdate(req.params.id, req.body, {
+    event = await Event.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
     });
@@ -337,6 +456,7 @@ export const updateEvent = async (req, res) => {
       data: { event },
     });
   } catch (error) {
+    console.error('Update event error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -633,6 +753,20 @@ export const approveEvent = async (req, res) => {
     event.approvedBy = req.user._id;
     event.approvedAt = new Date();
     await event.save();
+
+    // Notify organizer about approval
+    const io = req.app.get('io');
+    const populatedEvent = await Event.findById(event._id).populate('organizer');
+
+    await createNotification(io, {
+      recipient: populatedEvent.organizer._id,
+      sender: req.user._id,
+      type: 'event_approved',
+      title: 'Event Approved',
+      message: `Your event "${event.title}" has been approved and is now published!`,
+      link: `/events/${event._id}`,
+      data: { eventId: event._id }
+    });
 
     res.status(200).json({
       success: true,
