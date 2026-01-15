@@ -49,16 +49,15 @@ const eventSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Category is required'],
     enum: [
-      'Business Seminar',
-      'Social & Networking',
-      'Sports & Fitness',
-      'Food & Drink',
-      'Workshops',
-      'Arts & Culture',
+      'Music',
+      'Sports',
+      'Arts',
       'Technology',
-      'Health & Wellness',
+      'Food & Drink',
+      'Business',
+      'Health',
       'Education',
-      'Charity',
+      'Entertainment',
       'Other'
     ],
   },
@@ -84,7 +83,6 @@ const eventSchema = new mongoose.Schema({
   },
   startTime: {
     type: String,
-    required: [true, 'Event start time is required'],
   },
   endTime: {
     type: String,

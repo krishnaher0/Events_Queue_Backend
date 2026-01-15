@@ -15,6 +15,9 @@ import path from 'path';
 import paymentRoutes from './routes/paymentRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
 import communityRoutes from './routes/communityRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import reviewRoutes from './routes/reviewRoutes.js';
 import jwt from 'jsonwebtoken';
 import User from './model/User.js';
 import Community from './model/Community.js';
@@ -63,6 +66,9 @@ app.use('/api/organizer', organizerRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/communities', communityRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 // Start Server with Socket.io
 const PORT = process.env.PORT || 3000;
@@ -98,9 +104,16 @@ io.use(async (socket, next) => {
   }
 });
 
+// Make io globally accessible for notifications
+app.set('io', io);
+
 // Socket.io connection handler
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.user.fullName} (${socket.user._id})`);
+
+  // Join user's personal notification room
+  socket.join(`user_${socket.user._id}`);
+  console.log(`User ${socket.user._id} joined notification room`);
 
   // Join community chat room
   socket.on('join-community', async (communityId) => {

@@ -5,6 +5,7 @@ import {
   completePendingEventPayment,
   initiateOrderPayment,
   verifyOrderPayment,
+  completePendingOrderPayment,
   initiateVenuePayment,
   verifyVenuePayment,
   completePendingVenuePayment,
@@ -24,6 +25,7 @@ router.post('/event/complete-pending', protect, completePendingEventPayment); //
 // Order payment routes (for products)
 router.post('/order/initiate', protect, initiateOrderPayment); // Initiate product order payment
 router.post('/order/verify', verifyOrderPayment); // Verify product order payment
+router.post('/order/complete-pending', protect, completePendingOrderPayment); // Complete pending order payment
 
 // Venue payment routes
 router.post('/venue/:bookingId/initiate', protect, initiateVenuePayment); // Initiate venue booking payment
