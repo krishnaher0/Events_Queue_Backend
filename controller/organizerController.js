@@ -1,5 +1,6 @@
 import OrganizerRequest from '../model/OrganizerRequest.js';
 import User from '../model/User.js';
+import { createNotification } from './notificationController.js';
 
 // Submit organizer request (for normal users)
 export const submitOrganizerRequest = async (req, res) => {
@@ -135,6 +136,23 @@ export const approveOrganizerRequest = async (req, res) => {
       role: 'organizer',
     });
 
+    // Send notification to user
+    const io = req.app.get('io');
+    if (io) {
+      await createNotification(io, {
+        recipient: request.user,
+        sender: req.user._id,
+        type: 'system',
+        title: 'Organizer Request Approved',
+        message: 'Congratulations! Your organizer request has been approved. You can now create and manage events.',
+        link: '/create-event',
+        data: {
+          requestId: request._id,
+          adminNotes: adminNotes
+        }
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Organizer request approved successfully',
@@ -175,6 +193,23 @@ export const rejectOrganizerRequest = async (req, res) => {
     request.reviewedBy = req.user._id;
     request.reviewedAt = new Date();
     await request.save();
+
+    // Send notification to user
+    const io = req.app.get('io');
+    if (io) {
+      await createNotification(io, {
+        recipient: request.user,
+        sender: req.user._id,
+        type: 'system',
+        title: 'Organizer Request Rejected',
+        message: `Your organizer request has been rejected. ${adminNotes ? 'Reason: ' + adminNotes : 'Please contact support for more information.'}`,
+        link: '/profile',
+        data: {
+          requestId: request._id,
+          adminNotes: adminNotes
+        }
+      });
+    }
 
     res.status(200).json({
       success: true,

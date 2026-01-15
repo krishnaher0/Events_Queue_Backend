@@ -262,6 +262,24 @@ export const verifyEventPayment = async (req, res) => {
       }
 
       console.log('Payment verification complete - returning success');
+
+      // Send notification to user
+      const io = req.app.get('io');
+      if (io && event) {
+        await createNotification(io, {
+          recipient: payment.user,
+          type: 'payment_received',
+          title: 'Payment Successful',
+          message: `Your payment of Rs. ${payment.amount} for "${event.title}" has been confirmed!`,
+          link: `/my-tickets`,
+          data: {
+            paymentId: payment._id,
+            eventId: event._id,
+            amount: payment.amount
+          }
+        });
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Payment verified successfully',
@@ -519,6 +537,24 @@ export const verifyOrderPayment = async (req, res) => {
               $inc: { stock: -item.quantity, sold: item.quantity },
             });
           }
+
+          // Send notification to user
+          const io = req.app.get('io');
+          if (io) {
+            await createNotification(io, {
+              recipient: payment.user,
+              type: 'order_confirmed',
+              title: 'Order Confirmed',
+              message: `Your order #${order.orderNumber} has been confirmed! Total: Rs. ${payment.amount}`,
+              link: `/orders`,
+              data: {
+                paymentId: payment._id,
+                orderId: order._id,
+                orderNumber: order.orderNumber,
+                amount: payment.amount
+              }
+            });
+          }
         }
 
         return res.status(200).json({
@@ -733,12 +769,29 @@ export const verifyVenuePayment = async (req, res) => {
         await payment.save();
 
         // Update booking
-        await VenueBooking.findByIdAndUpdate(payment.referenceId, {
+        const booking = await VenueBooking.findByIdAndUpdate(payment.referenceId, {
           'payment.status': 'paid',
           'payment.transactionId': transaction_code,
           'payment.paidAt': new Date(),
           status: 'confirmed',
-        });
+        }, { new: true }).populate('venue', 'name');
+
+        // Send notification to user
+        const io = req.app.get('io');
+        if (io && booking) {
+          await createNotification(io, {
+            recipient: payment.user,
+            type: 'venue_booking',
+            title: 'Venue Booking Confirmed',
+            message: `Your booking for "${booking.venue.name}" has been confirmed! Total: Rs. ${payment.amount}`,
+            link: `/my-venue-bookings`,
+            data: {
+              paymentId: payment._id,
+              bookingId: booking._id,
+              amount: payment.amount
+            }
+          });
+        }
 
         return res.status(200).json({
           success: true,
@@ -826,6 +879,9 @@ export const verifyKhaltiPaymentCallback = async (req, res) => {
       payment.gatewayResponse = khaltiResponse;
       await payment.save();
 
+      // Get Socket.IO instance for notifications
+      const io = req.app?.get('io');
+
       // Update the related booking/order based on type
       if (payment.type === 'event_booking') {
         const event = await Event.findById(payment.referenceId);
@@ -847,14 +903,46 @@ export const verifyKhaltiPaymentCallback = async (req, res) => {
           await User.findByIdAndUpdate(payment.user, {
             $push: { bookedEvents: event._id },
           });
+
+          // Send notification
+          if (io) {
+            await createNotification(io, {
+              recipient: payment.user,
+              type: 'event_booking',
+              title: 'Event Booking Confirmed',
+              message: `Your booking for "${event.title}" has been confirmed! Total: Rs. ${payment.amount}`,
+              link: `/my-tickets`,
+              data: {
+                paymentId: payment._id,
+                eventId: event._id,
+                amount: payment.amount
+              }
+            });
+          }
         }
       } else if (payment.type === 'venue_booking') {
-        await VenueBooking.findByIdAndUpdate(payment.referenceId, {
+        const booking = await VenueBooking.findByIdAndUpdate(payment.referenceId, {
           'payment.status': 'paid',
           'payment.transactionId': khaltiResponse.transaction_id,
           'payment.paidAt': new Date(),
           status: 'confirmed',
-        });
+        }, { new: true }).populate('venue', 'name');
+
+        // Send notification
+        if (io && booking) {
+          await createNotification(io, {
+            recipient: payment.user,
+            type: 'venue_booking',
+            title: 'Venue Booking Confirmed',
+            message: `Your booking for "${booking.venue.name}" has been confirmed! Total: Rs. ${payment.amount}`,
+            link: `/my-venue-bookings`,
+            data: {
+              paymentId: payment._id,
+              bookingId: booking._id,
+              amount: payment.amount
+            }
+          });
+        }
       } else if (payment.type === 'product_order') {
         const order = await Order.findById(payment.referenceId);
         if (order) {
@@ -866,6 +954,23 @@ export const verifyKhaltiPaymentCallback = async (req, res) => {
           for (const item of order.items) {
             await Product.findByIdAndUpdate(item.product, {
               $inc: { stock: -item.quantity, sold: item.quantity },
+            });
+          }
+
+          // Send notification
+          if (io) {
+            await createNotification(io, {
+              recipient: payment.user,
+              type: 'order_confirmed',
+              title: 'Order Confirmed',
+              message: `Your order #${order.orderNumber} has been confirmed! Total: Rs. ${payment.amount}`,
+              link: `/orders`,
+              data: {
+                paymentId: payment._id,
+                orderId: order._id,
+                orderNumber: order.orderNumber,
+                amount: payment.amount
+              }
             });
           }
         }

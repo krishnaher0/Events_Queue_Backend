@@ -1,5 +1,7 @@
 import Product from '../model/Product.js';
+import User from '../model/User.js';
 import { deleteImage, getPublicIdFromUrl } from '../config/cloudinary.js';
+import { createNotification } from './notificationController.js';
 
 // @desc    Get all products
 // @route   GET /api/products
@@ -175,6 +177,25 @@ export const createProduct = async (req, res) => {
     }
 
     const product = await Product.create(productData);
+
+    // Send notification to all users about new product (only featured ones to avoid spam)
+    const io = req.app.get('io');
+    if (io && product.isFeatured) {
+      // Get all non-admin users to notify about new featured product
+      const users = await User.find({ role: { $in: ['user', 'organizer'] } }).limit(100).select('_id');
+
+      for (const user of users) {
+        await createNotification(io, {
+          recipient: user._id,
+          sender: req.user._id,
+          type: 'system',
+          title: 'New Product Available',
+          message: `Check out our new featured product: ${product.name}`,
+          link: `/shop/${product._id}`,
+          data: { productId: product._id }
+        });
+      }
+    }
 
     res.status(201).json({
       success: true,

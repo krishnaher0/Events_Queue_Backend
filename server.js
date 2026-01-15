@@ -18,6 +18,7 @@ import communityRoutes from './routes/communityRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
+import refundRoutes from './routes/refundRoutes.js';
 import jwt from 'jsonwebtoken';
 import User from './model/User.js';
 import Community from './model/Community.js';
@@ -69,6 +70,7 @@ app.use('/api/communities', communityRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/refunds', refundRoutes);
 
 // Start Server with Socket.io
 const PORT = process.env.PORT || 3000;

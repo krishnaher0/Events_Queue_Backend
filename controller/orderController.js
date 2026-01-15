@@ -1,5 +1,6 @@
 import Order from '../model/Order.js';
 import Product from '../model/Product.js';
+import { createNotification } from './notificationController.js';
 
 // @desc    Get my orders
 // @route   GET /api/orders/my
@@ -143,6 +144,22 @@ export const cancelOrder = async (req, res) => {
       });
     }
 
+    // Send notification to user
+    const io = req.app.get('io');
+    if (io) {
+      await createNotification(io, {
+        recipient: order.user,
+        type: 'order_cancelled',
+        title: 'Order Cancelled',
+        message: `Your order #${order.orderNumber} has been cancelled. ${order.cancellationReason}`,
+        link: `/orders`,
+        data: {
+          orderId: order._id,
+          orderNumber: order.orderNumber
+        }
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Order cancelled successfully',
@@ -244,6 +261,53 @@ export const updateOrderStatus = async (req, res) => {
     if (status === 'delivered') order.deliveredAt = new Date();
 
     await order.save();
+
+    // Send notification to user based on status
+    const io = req.app.get('io');
+    if (io) {
+      let notificationData = {
+        recipient: order.user,
+        sender: req.user._id,
+        link: `/orders`,
+        data: {
+          orderId: order._id,
+          orderNumber: order.orderNumber
+        }
+      };
+
+      switch (status) {
+        case 'confirmed':
+          notificationData.type = 'order_confirmed';
+          notificationData.title = 'Order Confirmed';
+          notificationData.message = `Your order #${order.orderNumber} has been confirmed and is being prepared.`;
+          break;
+        case 'processing':
+          notificationData.type = 'order_confirmed';
+          notificationData.title = 'Order Processing';
+          notificationData.message = `Your order #${order.orderNumber} is now being processed.`;
+          break;
+        case 'shipped':
+          notificationData.type = 'order_shipped';
+          notificationData.title = 'Order Shipped';
+          notificationData.message = `Your order #${order.orderNumber} has been shipped!${trackingNumber ? ` Tracking: ${trackingNumber}` : ''}`;
+          notificationData.data.trackingNumber = trackingNumber;
+          break;
+        case 'delivered':
+          notificationData.type = 'order_delivered';
+          notificationData.title = 'Order Delivered';
+          notificationData.message = `Your order #${order.orderNumber} has been delivered. Thank you for shopping with us!`;
+          break;
+        case 'cancelled':
+          notificationData.type = 'order_cancelled';
+          notificationData.title = 'Order Cancelled';
+          notificationData.message = `Your order #${order.orderNumber} has been cancelled.`;
+          break;
+      }
+
+      if (notificationData.type) {
+        await createNotification(io, notificationData);
+      }
+    }
 
     res.status(200).json({
       success: true,

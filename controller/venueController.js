@@ -1,6 +1,8 @@
 import Venue from '../model/Venue.js';
 import VenueBooking from '../model/VenueBooking.js';
+import User from '../model/User.js';
 import { deleteImage, getPublicIdFromUrl } from '../config/cloudinary.js';
+import { createNotification } from './notificationController.js';
 
 // @desc    Get all venues
 // @route   GET /api/venues
@@ -216,6 +218,36 @@ export const createVenue = async (req, res) => {
 
     const venue = await Venue.create(venueData);
 
+    // Send notification to creator if admin created it
+    const io = req.app.get('io');
+    if (io && req.user.role === 'admin') {
+      // Notify all admins about new venue
+      const admins = await User.find({ role: 'admin' });
+      for (const admin of admins) {
+        if (admin._id.toString() !== req.user._id.toString()) {
+          await createNotification(io, {
+            recipient: admin._id,
+            sender: req.user._id,
+            type: 'system',
+            title: 'New Venue Created',
+            message: `A new venue "${venue.name}" has been added to the platform.`,
+            link: `/venues/${venue._id}`,
+            data: { venueId: venue._id }
+          });
+        }
+      }
+    } else if (io) {
+      // Notify creator that venue is pending approval
+      await createNotification(io, {
+        recipient: req.user._id,
+        type: 'system',
+        title: 'Venue Submitted',
+        message: `Your venue "${venue.name}" has been submitted and is pending admin approval.`,
+        link: `/venues/${venue._id}`,
+        data: { venueId: venue._id }
+      });
+    }
+
     res.status(201).json({
       success: true,
       message: 'Venue created successfully',
@@ -370,12 +402,26 @@ export const approveVenue = async (req, res) => {
       req.params.id,
       { isApproved: true },
       { new: true }
-    );
+    ).populate('createdBy', 'fullName');
 
     if (!venue) {
       return res.status(404).json({
         success: false,
         message: 'Venue not found',
+      });
+    }
+
+    // Send notification to venue creator
+    const io = req.app.get('io');
+    if (io && venue.createdBy) {
+      await createNotification(io, {
+        recipient: venue.createdBy._id,
+        sender: req.user._id,
+        type: 'venue_approved',
+        title: 'Venue Approved',
+        message: `Your venue "${venue.name}" has been approved and is now live!`,
+        link: `/venues/${venue._id}`,
+        data: { venueId: venue._id }
       });
     }
 
